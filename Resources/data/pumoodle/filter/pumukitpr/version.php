@@ -18,11 +18,10 @@
 /**
  * Media filter.
  *
- * @copyright  Andres Perez aperez@teltek.es
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version = 2020062506;       // The current plugin version (Date: YYYYMMDDXX)
+$plugin->version = 2020072701;       // The current plugin version (Date: YYYYMMDDXX)
 $plugin->requires = 2016112900;       // Requires this Moodle version
 $plugin->component = 'filter_pumukitpr'; // Full name of the plugin (used for diagnostics)

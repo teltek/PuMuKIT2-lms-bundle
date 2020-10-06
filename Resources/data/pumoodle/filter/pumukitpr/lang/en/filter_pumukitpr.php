@@ -11,3 +11,4 @@ $string['iframe_singlevideo_height'] = 'Single Video Height';
 $string['iframe_multivideo_width'] = 'Multi Video Width';
 $string['iframe_multivideo_height'] = 'Multi Video Height';
 $string['css_notvalid'] = "Value not valid: Use a number followed by an unit ('px', 'em' or '%').";
+$string['pumukit_filter_domain'] = "Domain to allow add public video links from PuMuKIT";

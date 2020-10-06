@@ -21,11 +21,10 @@ class filter_pumukitpr extends moodle_text_filter
     public const VIDEO_SEARCH_REGEX = '/<iframe[^>]*?src=\"(https:\\/\\/[^>]*?\\/openedx\\/openedx\\/embed.*?)".*?>.*?<\\/iframe>/is';
     public const LEGACY_VIDEO_SEARCH_REGEX = '/<a\\s[^>]*href=["\'](https?:\\/\\/[^>]*?\\/openedx\\/openedx\\/embed.*?)["\']>.*?<\\/a>/is';
     public const LEGACY_PLAYLIST_SEARCH_REGEX = '/<a\\s[^>]*href=["\'](https?:\\/\\/[^>]*?\\/openedx\\/openedx\\/playlist\\/embed.*?)["\']>.*?<\\/a>/is';
+    public const VIDEO_DOMAIN_REGEX = '/^http.*.\/video\/.*/';
 
     public function filter($text, array $options = []): string
     {
-        global $CFG;
-
         if (!filter_is_valid_text($text)) {
             return $text;
         }
@@ -42,6 +41,13 @@ class filter_pumukitpr extends moodle_text_filter
         if (filter_is_an_iframe($text)) {
             $search = (filter_is_a_playlist($text)) ? self::PLAYLIST_SEARCH_REGEX : self::VIDEO_SEARCH_REGEX;
             $iframe = preg_replace_callback($search, 'filter_pumukitpr_openedx_callback', $text);
+            if (filter_validate_returned_iframe($text, $iframe)) {
+                return $iframe;
+            }
+        }
+
+        if (filter_is_an_video_domain($text)) {
+            $iframe = preg_replace_callback(self::VIDEO_DOMAIN_REGEX, 'filter_pumukitpr_video_domain_callback', $text);
             if (filter_validate_returned_iframe($text, $iframe)) {
                 return $iframe;
             }
@@ -80,6 +86,11 @@ function filter_is_an_link(string $text): bool
     return false !== stripos($text, '<a');
 }
 
+function filter_is_an_video_domain(string $text): bool
+{
+    return false !== stripos($text, 'http') && false !== stripos($text, 'video');
+}
+
 function filter_is_legacy_url(string $text): bool
 {
     return false !== stripos($text, 'pumoodle');
@@ -101,13 +112,9 @@ function filter_is_valid_text(string $text): bool
 
 function filter_pumukitpr_openedx_callback(array $link): string
 {
-    global $CFG;
-    //Get arguments from url.
-
     $link_params = [];
     parse_str(html_entity_decode(parse_url($link[1], PHP_URL_QUERY)), $link_params);
-    //Initialized needed arguments.
-    $multistream = isset($link_params['multistream']) ? ('1' == $link_params['multistream']) : false;
+
     $mm_id = $link_params['id'] ?? null;
     if (!$mm_id) {
         $mm_id = $link_params['playlist'] ?? null;
@@ -127,36 +134,49 @@ function filter_pumukitpr_openedx_callback(array $link): string
 
 function filter_pumukitpr_callback(array $link): string
 {
-    global $CFG;
-    //Get arguments from url.
     $link_params = [];
     parse_str(html_entity_decode(parse_url($link[1], PHP_URL_QUERY)), $link_params);
-    //Initialized needed arguments.
-    $multistream = isset($link_params['multistream']) ? ('1' == $link_params['multistream']) : false;
+
+    $multiStream = isset($link_params['multistream']) ? ('1' == $link_params['multistream']) : false;
     $mm_id = $link_params['id'] ?? null;
     $email = $link_params['email'] ?? null;
-    //Prepare new parameters.
+
     $extra_arguments = [
         'professor_email' => $email,
         'hash' => filter_create_ticket($mm_id, $email ?: '', parse_url($link[1], PHP_URL_HOST)),
     ];
     $new_url_arguments = '?'.http_build_query(array_merge($extra_arguments, $link_params), '', '&');
-    //Create new url with ticket and correct email.
-    $url = preg_replace('/(\\?.*)/i', $new_url_arguments, $link[1]);
-    //Prepare and return iframe with correct sizes to embed on webpage.
-    if ($multistream) {
-        $iframe_width = $CFG->iframe_multivideo_width ?: '100%';
-        $iframe_height = $CFG->iframe_multivideo_height ?: '333px';
-    } else {
-        $iframe_width = $CFG->iframe_singlevideo_width ?: '592px';
-        $iframe_height = $CFG->iframe_singlevideo_height ?: '333px';
-    }
-    $iframe_html = '<iframe src="'.$url.'"'.
-                   '        style="border:0px #FFFFFF none; width:'.$iframe_width.'; height:'.$iframe_height.';"'.
-                   '        scrolling="no" frameborder="0" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen="true" >'.
-                   '</iframe>';
 
-    return $iframe_html;
+    $url = preg_replace('/(\\?.*)/i', $new_url_arguments, $link[1]);
+
+    return generate_iframe($url, $multiStream);
+}
+
+function filter_pumukitpr_video_domain_callback(string $link): string
+{
+    global $CFG;
+
+    if (false === stripos($link[1], $CFG->pumukit_filter_domain)) {
+        return $link;
+    }
+
+    $link_params = [];
+    parse_str(html_entity_decode(parse_url($link[1], PHP_URL_QUERY)), $link_params);
+
+    $multiStream = isset($link_params['multistream']) ? ('1' === $link_params['multistream']) : false;
+    $mm_id = $link_params['id'] ?? null;
+    $email = $link_params['email'] ?? null;
+
+    $extra_arguments = [
+        'professor_email' => $email,
+        'hash' => filter_create_ticket($mm_id, $email ?: '', parse_url($link[1], PHP_URL_HOST)),
+    ];
+    $new_url_arguments = '?'.http_build_query(array_merge($extra_arguments, $link_params), '', '&');
+
+    $url = preg_replace('/(\\?.*)/i', $new_url_arguments, $link[1]);
+    $url = str_replace('/video/', '/iframe/', $url);
+
+    return generate_iframe($url, $multiStream);
 }
 
 function filter_create_ticket($id, $email, $domain): string
@@ -168,4 +188,35 @@ function filter_create_ticket($id, $email, $domain): string
     $date = date('d/m/Y');
 
     return md5($email.$secret.$date.$domain);
+}
+
+function generate_iframe(string $url, string $isMultiStream)
+{
+    $width = getIframeWidth($isMultiStream);
+    $height = getIframeHeight($isMultiStream);
+
+    return '<iframe src="'.$url.'"'.
+               '        style="border:0 #FFFFFF none; width:'.$width.'; height:'.$height.';"'.
+               '        scrolling="no" frameborder="0" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen="true" >'.
+               '</iframe>';
+}
+
+function getIframeWidth(string $isMultiStream): string
+{
+    global $CFG;
+
+    if ($isMultiStream) {
+        return $CFG->iframe_multivideo_width ?: '100%';
+    }
+
+    return $CFG->iframe_singlevideo_width ?: '592px';
+}
+
+function getIframeHeight(string $isMultiStream): string
+{
+    if ($isMultiStream) {
+        return $CFG->iframe_multivideo_height ?: '333px';
+    }
+
+    return $CFG->iframe_singlevideo_height ?: '333px';
 }
